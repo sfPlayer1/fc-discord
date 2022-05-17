@@ -1,0 +1,2 @@
+Main-Class: fcdiscord.server.Main
+Class-Path: lib/javacord-3.4.0-shaded.jar lib/tomlj-1.0.0.jar lib/antlr4-runtime-4.7.2.jar

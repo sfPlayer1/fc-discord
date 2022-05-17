@@ -1,0 +1,12 @@
+bin/
+build/
+tmp/
+archive/
+run/
+lib/
+.gradle/
+.settings/
+.classpath
+.project
+*.jar
+deploy.sh
