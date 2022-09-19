@@ -4,7 +4,7 @@ name="FC Bot"
 jarname="fcbot-1"
 manifest=Manifest.txt
 target=16
-classPath="lib/javacord-3.4.0-shaded.jar:lib/tomlj-1.0.0.jar"
+classPath="lib/javacord-3.4.0-shaded.jar:lib/nanojson-1.7.jar:lib/tomlj-1.0.0.jar"
 sourcePath=
 extraOpts=
 

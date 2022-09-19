@@ -15,12 +15,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Locale;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -28,6 +23,11 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import com.grack.nanojson.JsonObject;
+import com.grack.nanojson.JsonParser;
+import com.grack.nanojson.JsonParserException;
+import fcdiscord.Config;
+import fcdiscord.server.Main;
 import fcdiscord.server.update.Mod.ModEntry;
 import fcdiscord.server.update.Mod.ModList;
 import org.javacord.api.entity.emoji.Emoji;
@@ -170,7 +170,9 @@ public final class ModUpdateHandler {
 						URI uri = new URI(rawUrl);
 
 						System.out.println("processing url "+uri);
+						msg.addReaction(WORKING);
 						outputs.add(handleUrl(uri, instancePath, simulate));
+						msg.removeReactionByEmoji(WORKING);
 						it.remove();
 					} catch (URISyntaxException e) {
 						// ignore
@@ -232,14 +234,65 @@ public final class ModUpdateHandler {
 
 		if (host.equals(CF_LINK_HOST)
 				&& (matcher = CF_LINK_PATTERN.matcher(path)).matches()) {
-			URI lookupUrl = new URI("https", null, "addons-ecs.forgesvc.net", -1, "/api/v2/addon/0/file/%s/download-url".formatted(matcher.group(1)), null, null);
-			HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(lookupUrl).timeout(TIMEOUT).build(), BodyHandlers.ofString());
-			if (response.statusCode() != 200) throw new IOException("Request to "+lookupUrl+" failed: "+response.statusCode());
 
-			uri = new URI(response.body().trim());
+			uri = fetchFileUriFromCurse(matcher);
 		}
 
 		return handleDownload(uri, instancePath, simulate);
+	}
+
+	private static URI fetchFileUriFromCurse(Matcher matcher) throws URISyntaxException, JsonParserException, IOException, InterruptedException {
+		// It's mad how much you have to do to simply get the file from cf these days
+		URI modSearchUrl = new URI("https", null, "api.curseforge.com", -1, "/v1/mods/search", "slug=%s&gameId=432&classId=6".formatted(matcher.group(1)), null);
+		HttpResponse<String> response = httpClient.send(HttpRequest.newBuilder(modSearchUrl).headers("x-api-key", Main.config.getCfApiToken()).timeout(TIMEOUT).build(), BodyHandlers.ofString());
+
+		// Fetch the id from the first data object
+		JsonObject responseBody = JsonParser.object().from(response.body());
+		if (responseBody.getArray("data").size() == 0 || !responseBody.getArray("data").getObject(0).has("id")) {
+			throw new RuntimeException("Unable to find project on the curseforge api. Slug is possibly wrong?");
+		}
+
+		int projectId = responseBody.getArray("data").getObject(0).getInt("id");
+
+		String fileId = matcher.group(2);
+		// Get the file name by looking up the file id using the projectId from above
+		URI filesUrl = new URI("https", null, "api.curseforge.com", -1, "/v1/mods/%s/files/%s".formatted(projectId, fileId), null, null);
+		HttpResponse<String> filesResponse = httpClient.send(HttpRequest.newBuilder(filesUrl).headers("x-api-key", Main.config.getCfApiToken()).timeout(TIMEOUT).build(), BodyHandlers.ofString());
+
+		// Pull the actual name from data
+		JsonObject filesResponseBody = JsonParser.object().from(filesResponse.body());
+		if (!filesResponseBody.has("data") || !filesResponseBody.getObject("data").has("id")) {
+			throw new RuntimeException("Unable to retrieve project id from the project slug, possible curse is broken?");
+		}
+
+		String fileName = filesResponseBody.getObject("data").getString("fileName");
+
+		// This sometimes won't work but looks like it's only effected on ancient version of the game
+		// Example: https://mediafiles.forgecdn.net/files/538/70/gi.class with the file id of 538070... why does it miss
+		// 		    the 0 and why do none of the other files I've tested do the same even when the 0 sits in the same place?
+		String[] parts = new String[] {
+				fileId.substring(0, 4),
+				fileId.substring(4, Math.min(7, fileId.length()))
+		};
+
+		// Run over each possible endpoint to generate a download url. If we hit a 200, we've got the correct file!
+		URI lookupUrl = null;
+		boolean foundValid = false;
+		String[] variants = new String[]{"mediafiles", "media", "edge"};
+		for (String variant : variants) {
+			lookupUrl = new URI("https", null, "%s.forgecdn.net".formatted(variant), -1, "/files/%s/%s/%s".formatted(parts[0], parts[1], fileName), null, null);
+			HttpResponse<String> fileDownloadReq = httpClient.send(HttpRequest.newBuilder(lookupUrl).timeout(Duration.ofSeconds(5)).build(), BodyHandlers.ofString());
+			if (fileDownloadReq.statusCode() == 200) {
+				foundValid = true;
+				break;
+			}
+		}
+
+		if (!foundValid) {
+			throw new RuntimeException("Unable to find any files on forgecdn with the id of %s".formatted(fileId));
+		}
+
+		return lookupUrl;
 	}
 
 	private static InstallResult handleDownload(URI uri, Path instancePath, boolean simulate) throws Exception {
@@ -399,13 +452,14 @@ public final class ModUpdateHandler {
 	private static final String SIM_PASS = "✅";
 	private static final String SIM_FAIL = "❎";
 	private static final String SIM_NEW = "✨";
+	private static final String WORKING = "⏳";
 
 	private static final Path TARGET_DIR = Paths.get("servermods");
 	private static final Duration TIMEOUT = Duration.ofSeconds(20);
 
 	private static final Pattern URL_PATTERN = Pattern.compile("(https?://[^\\s<]+[^\\s<\\.,:\\)])"); // approximate set or urls detected by discord (made clickable)
 	private static final String CF_LINK_HOST = "www.curseforge.com";
-	private static final Pattern CF_LINK_PATTERN = Pattern.compile("/minecraft/mc-mods/[^/]+/(?:files|download)/(\\d+)(?:/file)?");
+	private static final Pattern CF_LINK_PATTERN = Pattern.compile("/minecraft/mc-mods/([^/]+)/(?:files|download)/(\\d+)(?:/file)?");
 
 	private static final Pattern CONTENT_DISPOSITION_PATTERN = Pattern.compile("\\s*attachment\\s*;(?:.+?;)?\\s*"
 			+ "(?:filename\\s*=\\s*|filename\\*\\s*=\\s*[^']+'[^']*')(\".+?\"|[^\"]+)\\s*(?:;.+?)?", Pattern.CASE_INSENSITIVE);
