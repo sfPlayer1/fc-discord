@@ -35,9 +35,11 @@ import org.javacord.api.listener.message.reaction.ReactionAddListener;
 import org.javacord.api.listener.server.ServerBecomesAvailableListener;
 
 public final class Main {
+	public static Config config;
+
 	public static void main(String[] args) throws IOException {
 		Path configFile = Paths.get(args.length == 0 ? "config.properties" : args[0]);
-		Config config = Config.createForFile(configFile, false, false);
+		config = Config.createForFile(configFile, false, false);
 
 		if (!config.isValidForApiServer() && !config.isValidForUpdateHandler()) {
 			System.err.println("Missing config entries");

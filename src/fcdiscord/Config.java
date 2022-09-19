@@ -49,6 +49,13 @@ public final class Config {
 			save = true;
 		}
 
+		if (properties != null && (value = properties.getProperty("cfApiToken")) != null && !value.isEmpty() && !value.equals("0")) {
+			ret.cfApiToken = value;
+		} else {
+			if (!clientOnly) ret.cfApiToken = "";
+			save = true;
+		}
+
 		if (properties != null && (value = properties.getProperty("apiPassword")) != null && !value.isEmpty()) {
 			ret.apiPassword = value;
 		} else {
@@ -104,6 +111,7 @@ public final class Config {
 			if (!clientOnly) {
 				properties.setProperty("token", ret.token);
 				properties.setProperty("guildId", ret.guildId != 0 ? Long.toUnsignedString(ret.guildId) : "");
+				properties.setProperty("cfApiToken", ret.cfApiToken);
 
 				for (int idx = 0; idx < ret.instances.size(); idx++) {
 					Instance instance = ret.instances.get(idx);
@@ -230,6 +238,10 @@ public final class Config {
 		return guildId;
 	}
 
+	public String getCfApiToken() {
+		return cfApiToken;
+	}
+
 	public List<Instance> getInstances() {
 		if (clientOnly) throw new IllegalStateException();
 
@@ -286,6 +298,7 @@ public final class Config {
 	String token;
 	long guildId;
 	List<Instance> instances;
+	String cfApiToken;
 
 	long channelId; // used for external client (mod)
 
